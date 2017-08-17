@@ -265,6 +265,78 @@ describe('queue', function() {
         queue.start();
     });
 
+    it('should wait for task to be done if has notification', function(done) {
+        var ITERATIONS = 100;
+        var TASK_EXECUTION_TIME = 1000;
+        var QUEUE_WEIGHT_LIMIT = 10;
+        var ESTIMATED_TEST_EXECUTION_TIME = ITERATIONS * TASK_EXECUTION_TIME / QUEUE_WEIGHT_LIMIT;
+        var TIME_OFFSET = 300; // Add some offset just in case;
+
+        // Should increase mocha test timeout
+        this.timeout(ESTIMATED_TEST_EXECUTION_TIME + TIME_OFFSET);
+
+        var queue = new Queue({weightLimit : QUEUE_WEIGHT_LIMIT});
+        var tasks = [];
+        var enqueue = function(task) {
+          tasks.push(queue.enqueue(task, {priority: 1, weight: 1}));
+        };
+        var getProgress = function(num) {
+          return Math.round(num * 100 / tasks.length);
+        };
+        var createTask = function(index) {
+          return function() {
+            var defer = vow.defer();
+
+            var msg = 'task ' + index + ' starts';
+            console.log(msg);
+            setTimeout(function() {
+              /**
+               * IF COMMENT OUT THE NEXT LINE IT WILL PASS THE TEST
+               */
+              defer.notify(msg);
+            }, 20);
+
+            setTimeout(function() {
+              defer.resolve(index);
+            }, TASK_EXECUTION_TIME);
+
+            return defer.promise();
+          };
+        };
+
+
+        for(var i = 0; i < ITERATIONS; i++) {
+          enqueue(createTask(i));
+        }
+
+        var TEST_START_TIME = Date.now();
+
+        queue.start();
+
+        var job = vow.all(tasks)
+          .progress(function (msg) {
+            var stats = queue.getStats();
+            return {
+              message: msg,
+              processed: getProgress(stats.processedTasksCount),
+              processing: getProgress(stats.processingTasksCount)
+            };
+          });
+
+        job.progress(function(stat) {
+          console.log(stat);
+        })
+        .done(function(res) {
+          var TEST_EXECUTION_TIME = Date.now() - TEST_START_TIME;
+
+          console.log('TEST_EXECUTION_TIME', TEST_EXECUTION_TIME);
+          console.log('ESTIMATED_TEST_EXECUTION_TIME', ESTIMATED_TEST_EXECUTION_TIME);
+
+          TEST_EXECUTION_TIME.should.be.approximately(ESTIMATED_TEST_EXECUTION_TIME, TIME_OFFSET);
+          done();
+        });
+    });
+
     describe('priority', function() {
         it('should exec according to priority (forward adding)', function(done) {
             var queue = new Queue({ weightLimit : 3 }),
